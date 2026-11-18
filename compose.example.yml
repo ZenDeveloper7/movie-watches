@@ -1,0 +1,41 @@
+# Example: run next to changedetection.io. Copy .env.example -> .env and
+# dashboard.env.example -> dashboard.env and fill them in.
+services:
+  changedetection:
+    image: ghcr.io/dgtlmoon/changedetection.io:latest
+    container_name: changedetection
+    ports:
+      - "5000:5000"
+    environment:
+      TZ: Asia/Kolkata
+      # Lets watches poll the internal helper at http://bms-seats:8000
+      ALLOW_IANA_RESTRICTED_ADDRESSES: "true"
+    volumes:
+      - ./datastore:/datastore
+    restart: unless-stopped
+
+  bms-seats:
+    build: .
+    container_name: bms-seats
+    hostname: bms-seats
+    env_file: ./.env
+    environment:
+      TZ: Asia/Kolkata
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  watch-dashboard:
+    build: .
+    container_name: watch-dashboard
+    command: ["python3", "-u", "/bms/dashboard.py"]
+    ports:
+      - "8000:8000"
+    env_file: ./dashboard.env
+    environment:
+      TZ: Asia/Kolkata
+      CD_URL: http://changedetection:5000
+      CD_PUBLIC_URL: http://localhost:5000   # link shown in the dashboard header
+      HELPER_URL: http://bms-seats:8000
+    depends_on: [changedetection, bms-seats]
+    restart: unless-stopped

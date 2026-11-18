@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Movie Watches</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Big+Shoulders+Display:wght@600;800&display=swap" rel="stylesheet">
+<style>
+/* Auditorium (dark) and matinee (light). Velvet = seat red, glow = projector light, live = status light. */
+:root {
+  --house: #ECEFF5; --stage: #FFFFFF; --ink: #1C1A33; --dim: #5D5B78; --rule: #D5D9E4;
+  --velvet: #B3243F; --velvet-ink: #FFFFFF; --live: #12907E; --hold: #A86A00; --fault: #B3243F;
+  --well: #E2E6EF; --field: #FFFFFF; --focus: #3D5AFE;
+  --display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+  --text: "Atkinson Hyperlegible", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --house: #17152B; --stage: #201E3A; --ink: #DCE3F0; --dim: #9C9BBE; --rule: #34315A;
+    --velvet: #D23C5A; --velvet-ink: #FFFFFF; --live: #34C3AE; --hold: #E8B04A; --fault: #FF7089;
+    --well: #2A2749; --field: #1A1831; --focus: #8EA2FF;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--house); color: var(--ink); font: 16px/1.5 var(--text); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---------- top bar ---------- */
+.bar { display: flex; align-items: baseline; gap: 16px; padding: 18px 24px 14px; border-bottom: 1px solid var(--rule); }
+.bar h1 { font: 800 30px/1 var(--display); letter-spacing: .01em; margin: 0; flex: 1; }
+.bar a { color: var(--dim); font-size: 14px; }
+.summary { color: var(--dim); font-size: 14px; }
+.summary b { color: var(--ink); }
+
+/* ---------- layout ---------- */
+.house { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 32px; padding: 24px; max-width: 1240px; margin: 0 auto; align-items: start; }
+@media (max-width: 920px) { .house { grid-template-columns: 1fr; padding: 16px; gap: 24px; } .bar { padding: 16px; } }
+
+/* ---------- board ---------- */
+.tools { display: flex; gap: 10px; margin-bottom: 8px; }
+.tools input { flex: 1; }
+.movie { padding: 20px 0 10px; border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 20px; align-items: start; }
+.poster { width: 100%; aspect-ratio: 2 / 3; border-radius: 6px; object-fit: cover; display: block; background: var(--well);
+  box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--ink) 60%, transparent); }
+.poster.none { display: grid; place-items: center; font: 800 40px/1 var(--display); color: var(--velvet);
+  border: 1px solid var(--rule); box-shadow: none; }
+@media (max-width: 560px) { .movie { grid-template-columns: 64px minmax(0, 1fr); gap: 14px; } .poster.none { font-size: 30px; } }
+.movie:last-child { border-bottom: 0; }
+.movie h2 { font: 800 clamp(30px, 5vw, 44px)/.95 var(--display); margin: 0 0 10px; letter-spacing: .005em; }
+.watch { border-radius: 8px; }
+.watch + .watch { margin-top: 2px; }
+.row { width: 100%; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 10px 12px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 8px; }
+.row:hover, .watch.open .row { background: var(--well); }
+.light { width: 10px; height: 10px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 25%, transparent); }
+.light.hold { background: var(--hold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--hold) 25%, transparent); }
+.light.fault { background: var(--fault); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fault) 25%, transparent); }
+.what { font-weight: 700; }
+.what small { font-weight: 400; color: var(--dim); font-size: 15px; }
+.when { color: var(--dim); font-size: 14px; text-align: right; white-space: nowrap; }
+.when .alert { color: var(--velvet); font-weight: 700; }
+.state { font-size: 14px; color: var(--hold); }
+.state.fault { color: var(--fault); }
+.detail { padding: 4px 12px 14px 38px; display: grid; gap: 10px; }
+.facts { font-size: 14px; color: var(--dim); margin: 0; }
+.url { font-size: 13px; color: var(--dim); word-break: break-all; margin: 0; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 560px) { .row { grid-template-columns: 14px minmax(0, 1fr); } .when { grid-column: 2; text-align: left; } .detail { padding-left: 12px; } }
+
+/* ---------- controls ---------- */
+button { font: inherit; font-size: 15px; color: var(--ink); background: var(--stage); border: 1px solid var(--rule);
+  padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+button:hover { border-color: var(--dim); }
+button.go { background: var(--velvet); border-color: var(--velvet); color: var(--velvet-ink); font-weight: 700; }
+button.go:hover { filter: brightness(1.08); }
+button.quiet { background: none; }
+button.danger { color: var(--fault); }
+button:disabled { opacity: .5; cursor: default; }
+input, select, textarea { font: inherit; font-size: 15px; color: var(--ink); background: var(--field); border: 1px solid var(--rule);
+  border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0; }
+textarea { resize: vertical; }
+label { display: grid; gap: 4px; font-size: 14px; color: var(--dim); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pair.three { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 420px) { .pair.three { grid-template-columns: 1fr; } }
+pre { background: var(--well); border-radius: 8px; padding: 10px 12px; margin: 0; overflow: auto; max-height: 340px;
+  font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+
+/* ---------- add panel ---------- */
+.panel { position: sticky; top: 16px; background: var(--stage); border: 1px solid var(--rule); border-radius: 14px; padding: 20px; display: grid; gap: 14px; }
+@media (max-width: 920px) { .panel { position: static; } }
+.panel h2 { font: 800 26px/1 var(--display); margin: 0; }
+.kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.kinds button { padding: 5px 12px; font-size: 14px; }
+.kinds button[aria-pressed="true"] { background: var(--ink); color: var(--stage); border-color: var(--ink); }
+.explain { font-size: 14px; color: var(--dim); margin: 0; }
+.screens { display: grid; gap: 6px; }
+.screens label { display: flex; gap: 10px; align-items: center; color: var(--ink); font-size: 15px;
+  border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+.screens label:has(input:checked) { border-color: var(--velvet); background: color-mix(in srgb, var(--velvet) 8%, transparent); }
+.screens input { width: auto; accent-color: var(--velvet); }
+.screens span small { display: block; color: var(--dim); font-size: 13px; }
+.movieinfo { font-size: 14px; background: var(--well); border-radius: 8px; padding: 10px 12px; display: flex; gap: 12px; align-items: flex-start; }
+.movieinfo img { width: 54px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 4px; flex: none; }
+.movieinfo b { font-size: 15px; }
+.submit { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.edit { display: grid; gap: 10px; }
+.empty { color: var(--dim); padding: 24px 0; }
+.empty b { color: var(--ink); }
+
+#toast { position: fixed; bottom: 18px; left: 50%; transform: translate(-50%, 8px); background: var(--ink); color: var(--house);
+  padding: 10px 18px; border-radius: 999px; font-size: 15px; opacity: 0; transition: opacity .18s, transform .18s; pointer-events: none;
+  max-width: calc(100% - 32px); }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Movie Watches</h1>
+  <span class="summary" id="summary"></span>
+  <a id="cdlink" href="#" target="_blank" rel="noopener">Open changedetection</a>
+</header>
+
+<div class="house">
+  <main>
+    <div class="tools">
+      <input id="filter" type="search" placeholder="Find a watch" aria-label="Find a watch">
+      <button id="refresh" class="quiet">Refresh</button>
+    </div>
+    <div id="board"><p class="empty">Loading watches…</p></div>
+  </main>
+
+  <aside class="panel" aria-labelledby="addtitle">
+    <h2 id="addtitle">Add a watch</h2>
+    <div class="kinds" id="kinds"></div>
+    <p class="explain" id="explain"></p>
+
+    <div id="moviebox" class="pair">
+      <label>Movie
+        <input id="movie" list="movielist" placeholder="Start typing a title">
+        <datalist id="movielist"></datalist>
+      </label>
+      <label>BMS event code
+        <input id="event" placeholder="ET00…">
+      </label>
+    </div>
+    <div id="movieinfo" class="movieinfo hidden"></div>
+
+    <div data-form="screens" class="form edit">
+      <label>Movie name in the theatre's link
+        <input id="s_keyword" placeholder="e.g. dune">
+      </label>
+      <div class="screens">
+        <label><input type="checkbox" id="v_aluc" checked><span>Dolby Cinema<small>Allu Cinemas, Kokapet</small></span></label>
+        <label><input type="checkbox" id="v_prhn" checked><span>PCX or HDR by Barco<small>Prasads Multiplex</small></span></label>
+        <label><input type="checkbox" id="v_custom"><span>Another theatre<small>Use its BMS theatre code</small></span></label>
+      </div>
+      <div class="pair three hidden" id="customvenue">
+        <label>Code<input id="cv_code" placeholder="AMBH"></label>
+        <label>Name<input id="cv_name" placeholder="AMB Cinemas"></label>
+        <label>Screens<input id="cv_re" placeholder="IMAX|DOLBY"></label>
+      </div>
+    </div>
+
+    <div data-form="lang" class="form pair">
+      <label>Language<select id="l_lang"><option value="">Pick a movie first</option></select></label>
+      <label>Or type one<input id="l_lang_custom" placeholder="Malayalam"></label>
+    </div>
+
+    <div data-form="district" class="form edit">
+      <label>District movie link<input id="d_url" placeholder="https://www.district.in/movies/…-MV123456"></label>
+      <div class="pair">
+        <label>Language<input id="d_lang" value="any"></label>
+        <label>Only on (optional)<input id="d_date" type="date"></label>
+      </div>
+    </div>
+
+    <div data-form="late" class="form edit">
+      <label>Where<select id="lt_src"><option value="bms">BookMyShow</option><option value="district">District</option></select></label>
+      <label class="hidden" id="lt_durl_l">District movie link<input id="lt_durl" placeholder="https://www.district.in/movies/…"></label>
+      <div class="pair">
+        <label>Date<input id="lt_date" type="date"></label>
+        <label>Starting from<input id="lt_from" type="time" value="20:00"></label>
+      </div>
+    </div>
+
+    <div data-form="custom" class="form">
+      <label>Link to watch<input id="c_url" placeholder="https://…"></label>
+    </div>
+
+    <div class="pair" id="datebox">
+      <label>From<input id="date_from" type="date"></label>
+      <label>To<input id="date_to" type="date"></label>
+    </div>
+
+    <div class="pair">
+      <label>Name<input id="title" placeholder="Filled in for you"></label>
+      <label>Check every
+        <select id="interval">
+          <option value="1">1 minute</option><option value="2">2 minutes</option><option value="5" selected>5 minutes</option>
+          <option value="10">10 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="submit">
+      <button id="createbtn" class="go">Add watch</button>
+      <button id="previewbtn">Preview</button>
+    </div>
+    <pre id="previewout" class="hidden"></pre>
+  </aside>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const KINDS = [
+  ["screens", "Premium screens", "Alerts when a Dolby, PCX or HDR show is added. The first check saves what's already open, so you won't get an alert for that."],
+  ["lang", "Language", "Alerts when a new theatre or date opens in one language, in any format."],
+  ["formats", "New formats", "Alerts when BookMyShow adds a language or format to the movie, like IMAX or an English dub."],
+  ["district", "District", "Alerts when bookings open on District. Allu and Prasads aren't on District."],
+  ["late", "Late shows", "Alerts when shows starting after a set time are added for one date."],
+  ["custom", "Other link", "Watches any page for added text."],
+];
+const VENUES = { ALUC: ["Allu Kokapet", "DOLBY CINEMA", "DOLBY"], PRHN: ["Prasads", "PCX|HDR", "PCX/HDR"] };
+const VENUE_NAMES = { ALUC: "Allu Kokapet", PRHN: "Prasads" };
+const SCREEN_NAMES = { "DOLBY CINEMA": "Dolby Cinema", "PCX|HDR": "PCX or HDR" };
+let cfg = {}, kind = "screens", movies = [], movie = null, watches = [], openId = null;
+const posters = {}; // movie group name -> image URL ("" when none found)
+
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 4000); }
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const ymd = d => d.replaceAll("-", "");
+const localYmd = d => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+const iso = d8 => `${d8.slice(0,4)}-${d8.slice(4,6)}-${d8.slice(6)}`;
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const pretty = d8 => `${MON[+d8.slice(4,6)-1]} ${+d8.slice(6)}`;
+function expand(a, b) {
+  const out = []; if (!a) return out;
+  let d = new Date(a + "T00:00:00"); const end = new Date((b || a) + "T00:00:00");
+  while (d <= end && out.length < 31) { out.push(localYmd(d)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+function rangeLabel(ds) {
+  if (!ds || !ds.length) return "";
+  if (ds.length === 1) return pretty(ds[0]);
+  const a = ds[0], b = ds[ds.length-1];
+  return a.slice(4,6) === b.slice(4,6) ? `${pretty(a)}-${+b.slice(6)}` : `${pretty(a)} to ${pretty(b)}`;
+}
+function clock(hhmm) { const h = +hhmm.slice(0,2), m = hhmm.slice(2); return `${h % 12 || 12}${m !== "00" ? ":" + m : ""} ${h >= 12 ? "PM" : "AM"}`; }
+function districtSlug(v) { const m = (v || "").match(/movies\/([\w-]+-MV\d+)/) || (v || "").match(/^([\w-]+-MV\d+)$/); return m ? m[1] : ""; }
+const slugTitle = s => s.replace(/-movie-tickets.*$/, "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+function movieName() { return (movie && movie.title) || $("#movie").value.trim() || $("#s_keyword").value.trim(); }
+
+/* ---------- add panel ---------- */
+function renderKinds() {
+  $("#kinds").innerHTML = KINDS.map(([k, l]) => `<button type="button" data-kind="${k}" aria-pressed="${k === kind}">${l}</button>`).join("");
+  $("#explain").textContent = KINDS.find(k => k[0] === kind)[2];
+  document.querySelectorAll(".form").forEach(f => f.classList.toggle("hidden", f.dataset.form !== kind));
+  $("#moviebox").classList.toggle("hidden", kind === "district" || kind === "custom" || (kind === "late" && $("#lt_src").value === "district"));
+  if (!["district", "custom"].includes(kind) && movie) $("#movieinfo").classList.remove("hidden"); else $("#movieinfo").classList.add("hidden");
+  $("#datebox").classList.toggle("hidden", !["screens", "lang"].includes(kind));
+  $("#interval").value = kind === "screens" ? "2" : "5";
+  $("#previewout").classList.add("hidden");
+  autoTitle();
+}
+$("#kinds").onclick = e => { const b = e.target.closest("button"); if (b) { kind = b.dataset.kind; renderKinds(); } };
+
+async function loadMovies() {
+  try { movies = await api("/api/movies"); $("#movielist").innerHTML = movies.map(m => `<option value="${esc(m.title)}"></option>`).join(""); }
+  catch (e) { toast("Couldn't load the BookMyShow movie list. Type the event code instead."); }
+}
+async function pickMovie() {
+  const v = $("#movie").value.trim();
+  const m = movies.find(x => x.title.toLowerCase() === v.toLowerCase());
+  if (!m) { movie = null; $("#movieinfo").classList.add("hidden"); autoTitle(); return; }
+  $("#event").value = m.event;
+  if (!$("#s_keyword").dataset.touched) $("#s_keyword").value = m.slug;
+  await loadMovieDetails(m.event, m);
+}
+async function loadMovieDetails(ev, base = {}) {
+  const box = $("#movieinfo"); box.classList.remove("hidden"); box.textContent = "Looking up the movie…";
+  try {
+    const d = await api("/api/movie/" + ev);
+    movie = { ...base, ...d };
+    const book = d.bookable.length ? d.bookable.map(b => `${b.language} ${b.format}`).join(", ") : "nothing yet";
+    box.innerHTML = `${d.poster ? `<img src="${esc(d.poster)}" alt="">` : ""}<div><b>${esc(d.title)}</b>${d.release ? `, releases ${esc(d.release)}` : ""}<br>
+      Bookable now: ${esc(book)}${d.listed_formats ? `<br>Announced in ${esc(d.listed_languages)}, ${esc(d.listed_formats)}` : ""}</div>`;
+    const langs = [...new Set(d.bookable.map(b => b.language))];
+    $("#l_lang").innerHTML = langs.length ? langs.map(l => `<option>${esc(l)}</option>`).join("") : `<option value="">None bookable yet, type one</option>`;
+  } catch (e) { box.textContent = "Couldn't look up that event code. Check it on the movie's BookMyShow link."; movie = base.event ? base : null; }
+  autoTitle();
+}
+$("#movie").addEventListener("change", pickMovie);
+$("#event").addEventListener("change", () => { const ev = $("#event").value.trim(); if (/^ET\d+$/.test(ev)) loadMovieDetails(ev, movies.find(m => m.event === ev) || {}); });
+$("#s_keyword").addEventListener("input", e => { e.target.dataset.touched = 1; autoTitle(); });
+$("#v_custom").onchange = e => { $("#customvenue").classList.toggle("hidden", !e.target.checked); autoTitle(); };
+$("#lt_src").onchange = () => { $("#lt_durl_l").classList.toggle("hidden", $("#lt_src").value !== "district"); renderKinds(); };
+["#date_from","#date_to","#l_lang","#l_lang_custom","#d_url","#d_lang","#d_date","#lt_date","#lt_from","#v_aluc","#v_prhn","#cv_code","#cv_name","#cv_re","#lt_durl","#c_url"]
+  .forEach(s => $(s).addEventListener("input", autoTitle));
+$("#date_from").addEventListener("change", () => { if (!$("#date_to").value || $("#date_to").value < $("#date_from").value) $("#date_to").value = $("#date_from").value; autoTitle(); });
+
+function build() {
+  const H = cfg.helper, name = movieName(), ds = expand($("#date_from").value, $("#date_to").value), dl = rangeLabel(ds);
+  const ev = $("#event").value.trim();
+  if (kind === "screens") {
+    const kw = $("#s_keyword").value.trim().toLowerCase();
+    if (!kw) throw new Error("Type the movie name to look for in the theatre's listings.");
+    if (!ds.length) throw new Error("Pick the dates to watch.");
+    const v = [];
+    if ($("#v_aluc").checked) v.push(["ALUC", ...VENUES.ALUC]);
+    if ($("#v_prhn").checked) v.push(["PRHN", ...VENUES.PRHN]);
+    if ($("#v_custom").checked) {
+      const c = $("#cv_code").value.trim().toUpperCase(), re = $("#cv_re").value.trim();
+      if (!c || !re) throw new Error("Fill in the other theatre's code and which screens to match.");
+      v.push([c, $("#cv_name").value.trim() || c, re, re.replace(/\|/g, "/")]);
+    }
+    if (!v.length) throw new Error("Pick at least one theatre.");
+    const short = (name || kw).replace(/^Avengers:\s*/i, "");
+    return v.map(([code, vname, re, label]) => ({
+      title: `${short} ${label} - ${vname} - ${dl}`,
+      url: `${H}/screens/${code}/${ds.join(",")}?movie=${encodeURIComponent(kw)}&screen=${encodeURIComponent(re)}`,
+    }));
+  }
+  if (kind === "lang") {
+    const lang = $("#l_lang_custom").value.trim() || $("#l_lang").value;
+    if (!lang) throw new Error("Pick or type a language.");
+    if (!ds.length) throw new Error("Pick the dates to watch.");
+    let evs = movie && movie.bookable ? movie.bookable.filter(b => b.language.toLowerCase() === lang.toLowerCase()).map(b => b.event) : [];
+    if (!evs.length && ev) evs = [ev];
+    if (!evs.length) throw new Error("Pick a movie first.");
+    return [{ title: `${name} - ${lang.toUpperCase()} dates & theatres (BMS)`, url: `${H}/lang/${evs.join(",")}/${lang.toLowerCase()}?dates=${ds.join(",")}` }];
+  }
+  if (kind === "formats") {
+    if (!ev) throw new Error("Pick a movie first.");
+    return [{ title: `${name} - new languages/formats (BMS)`, url: `${H}/formats/${ev}` }];
+  }
+  if (kind === "district") {
+    const slug = districtSlug($("#d_url").value.trim());
+    if (!slug) throw new Error("Paste the District movie link. It ends in -MV and a number.");
+    const lang = ($("#d_lang").value.trim() || "any").toLowerCase(), d = $("#d_date").value;
+    return [{ title: `${slugTitle(slug)} - ${lang === "any" ? "" : lang.toUpperCase() + " "}bookings open (District)${d ? " - " + pretty(ymd(d)) : ""}`,
+      url: `${H}/district/${lang}/${slug}${d ? "?date=" + d : ""}` }];
+  }
+  if (kind === "late") {
+    const d = $("#lt_date").value, from = ($("#lt_from").value || "20:00").replace(":", "");
+    if (!d) throw new Error("Pick the date.");
+    if ($("#lt_src").value === "district") {
+      const slug = districtSlug($("#lt_durl").value.trim());
+      if (!slug) throw new Error("Paste the District movie link.");
+      return [{ title: `${slugTitle(slug)} - ${pretty(ymd(d))} shows from ${clock(from)} (District)`, url: `${H}/district-late/${slug}?date=${d}&from=${from}` }];
+    }
+    if (!ev) throw new Error("Pick a movie first.");
+    return [{ title: `${name} - ${pretty(ymd(d))} shows from ${clock(from)} (BMS)`, url: `${H}/late/${ev}/${ymd(d)}?from=${from}` }];
+  }
+  const u = $("#c_url").value.trim();
+  if (!/^https?:\/\//.test(u)) throw new Error("Type a link starting with http:// or https://");
+  return [{ title: u, url: u }];
+}
+function autoTitle() {
+  const t = $("#title"); if (t.dataset.touched) return;
+  try { const b = build(); t.placeholder = b.length > 1 ? `${b.length} watches, named for you` : b[0].title; }
+  catch { t.placeholder = "Filled in for you"; }
+}
+$("#title").addEventListener("input", e => { e.target.dataset.touched = e.target.value ? 1 : ""; });
+
+$("#previewbtn").onclick = async () => {
+  const out = $("#previewout");
+  try {
+    const items = build(); out.classList.remove("hidden"); out.textContent = "Asking BookMyShow… this takes a few seconds per date.";
+    const texts = [];
+    for (const it of items) {
+      if (!it.url.startsWith(cfg.helper)) { texts.push(`${it.title}\nPreview works only for movie watches.`); continue; }
+      const r = await api("/api/preview?url=" + encodeURIComponent(it.url));
+      texts.push(`${it.title}\n${r.text}`);
+    }
+    out.textContent = texts.join("\n");
+  } catch (e) { out.classList.remove("hidden"); out.textContent = e.message; }
+};
+$("#createbtn").onclick = async () => {
+  const btn = $("#createbtn");
+  try {
+    const items = build(), custom = $("#title").value.trim();
+    btn.disabled = true; btn.textContent = "Adding…";
+    for (const it of items)
+      await api("/api/watches", { method: "POST", body: { title: custom && items.length === 1 ? custom : it.title, url: it.url, interval: $("#interval").value } });
+    toast(items.length > 1 ? `Added ${items.length} watches.` : "Added the watch.");
+    $("#title").value = ""; $("#title").dataset.touched = ""; $("#previewout").classList.add("hidden");
+    await loadWatches();
+  } catch (e) { toast(e.message); }
+  finally { btn.disabled = false; btn.textContent = "Add watch"; }
+};
+
+/* ---------- board ---------- */
+function ago(ts) {
+  if (!ts) return "never";
+  const s = Date.now() / 1000 - ts;
+  if (s < 90) return "just now";
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} h ago`;
+  return new Date(ts * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+function urlDates(u) {
+  let m = u.match(/\/screens\/\w+\/(\d{8}(?:,\d{8})*)/) || u.match(/[?&]dates=(\d{8}(?:,\d{8})*)/);
+  return m ? m[1].split(",") : null;
+}
+function setUrlDates(u, ds) {
+  const j = ds.join(",");
+  if (/\/screens\/\w+\/\d{8}/.test(u)) return u.replace(/(\/screens\/\w+\/)\d{8}(?:,\d{8})*/, `$1${j}`);
+  return u.replace(/([?&]dates=)\d{8}(?:,\d{8})*/, `$1${j}`);
+}
+/* What a watch covers, in words, from its helper URL. */
+function describe(w) {
+  const p = (w.url || "").replace(cfg.helper, ""), q = new URLSearchParams(p.split("?")[1] || "");
+  let m;
+  if ((m = p.match(/^\/screens\/(\w+)\/([\d,]+)/))) {
+    const scr = q.get("screen") || "", venue = VENUE_NAMES[m[1]] || m[1];
+    return { what: `${SCREEN_NAMES[scr] || scr.replace(/\|/g, " or ")} at ${venue}`, sub: rangeLabel(m[2].split(",")) };
+  }
+  if ((m = p.match(/^\/lang\/[\w,]+\/(\w+)/))) {
+    const l = m[1][0].toUpperCase() + m[1].slice(1);
+    return { what: `${l} bookings on BookMyShow`, sub: rangeLabel((q.get("dates") || "").split(",").filter(Boolean)) };
+  }
+  if (p.startsWith("/formats/")) return { what: "New languages or formats on BookMyShow", sub: "" };
+  if ((m = p.match(/^\/district-late\//))) return { what: `Shows from ${clock(q.get("from") || "2000")} on District`, sub: q.get("date") ? pretty(ymd(q.get("date"))) : "" };
+  if ((m = p.match(/^\/district\/(\w+)\//))) return { what: `${m[1] === "any" ? "Bookings" : m[1][0].toUpperCase() + m[1].slice(1) + " bookings"} on District`, sub: q.get("date") ? pretty(ymd(q.get("date"))) : "" };
+  if ((m = p.match(/^\/late\/\w+\/(\d{8})/))) return { what: `Shows from ${clock(q.get("from") || "2000")} on BookMyShow`, sub: pretty(m[1]) };
+  return { what: w.title, sub: "" };
+}
+/* Movie name from the watch title; "Godzilla" and "Godzilla Minus Zero" share a group. */
+function movieOf(t) {
+  return t.split(" - ")[0].replace(/\s+(DOLBY|PCX\/HDR|PCX|HDR|IMAX)(\/\w+)*$/i, "").replace(/^Avengers:?\s*/i, "").trim();
+}
+function groups(list) {
+  const gs = [];
+  for (const w of list) {
+    const n = movieOf(w.title), lc = n.toLowerCase();
+    let g = gs.find(g => { const a = g.key; return lc === a || lc.startsWith(a + " ") || a.startsWith(lc + " "); });
+    if (!g) gs.push(g = { key: lc, name: n, items: [] });
+    if (n.length > g.name.length) { g.name = n; }
+    g.key = g.key.length <= lc.length ? g.key : lc;
+    g.items.push(w);
+  }
+  return gs.sort((a, b) => a.name.localeCompare(b.name));
+}
+function health(w) {
+  if (w.error) return ["fault", "Last check failed"];
+  if (w.uses_default) return ["fault", "Checks only every 3 hours. Save it to fix."];
+  if (w.paused) return ["hold", "Paused"];
+  const overdue = w.last_checked && (Date.now() / 1000 - w.last_checked) > Math.max(w.interval * 180, 600);
+  if (overdue) return ["fault", "Overdue for a check"];
+  if (w.muted) return ["hold", w.pending_unmute ? "Muted until its next check" : "Muted"];
+  return ["", ""];
+}
+function renderBoard() {
+  const f = $("#filter").value.toLowerCase();
+  const list = watches.filter(w => !f || (w.title + " " + w.url).toLowerCase().includes(f));
+  const bad = watches.filter(w => health(w)[0] === "fault").length;
+  $("#summary").innerHTML = watches.length ? `<b>${watches.length}</b> watches${bad ? `, <b>${bad}</b> need a look` : ", all checking"}` : "";
+  if (!watches.length) { $("#board").innerHTML = `<p class="empty"><b>No watches yet.</b> Add one for the next big release.</p>`; return; }
+  if (!list.length) { $("#board").innerHTML = `<p class="empty">No watch matches “${esc(f)}”.</p>`; return; }
+  const gs = groups(list);
+  fetchPosters(gs);
+  $("#board").innerHTML = gs.map(g => `<section class="movie">${posterTag(g.name)}<div><h2>${esc(g.name)}</h2>${g.items.map(w => {
+    const d = describe(w), [lvl, note] = health(w), open = w.id === openId;
+    return `<div class="watch${open ? " open" : ""}" data-id="${w.id}">
+      <button class="row" data-act="toggle" aria-expanded="${open}">
+        <span class="light ${lvl}" aria-hidden="true"></span>
+        <span><span class="what">${esc(d.what)}</span>${d.sub ? ` <small>${esc(d.sub)}</small>` : ""}
+          ${note ? `<br><span class="state ${lvl}">${esc(note)}</span>` : ""}</span>
+        <span class="when">${w.last_changed ? `<span class="alert">Alert ${ago(w.last_changed)}</span>` : `Checked ${ago(w.last_checked)}`}</span>
+      </button>
+      ${open ? `<div class="detail">
+        <p class="facts">${esc(w.title)}<br>Checked ${ago(w.last_checked)}, every ${w.interval} min. ${w.last_changed ? `Last alert ${ago(w.last_changed)}.` : "No alerts yet."}</p>
+        ${w.error ? `<p class="state fault" style="margin:0">${esc(w.error)}</p>` : ""}
+        <div class="actions">
+          <button data-act="output">See what it sees</button>
+          <button data-act="recheck">Check now</button>
+          <button data-act="edit">Edit</button>
+          <button data-act="${w.paused ? "unpause" : "pause"}">${w.paused ? "Resume" : "Pause"}</button>
+          <button data-act="${w.muted ? "unmute" : "mute"}">${w.muted ? "Unmute" : "Mute"}</button>
+          <button data-act="delete" class="danger quiet">Delete</button>
+        </div>
+        <div class="slot"></div>
+      </div>` : ""}
+    </div>`;
+  }).join("")}</div></section>`).join("");
+}
+function posterTag(name) {
+  const u = posters[name];
+  return u ? `<img class="poster" src="${esc(u)}" alt="${esc(name)} poster" loading="lazy">`
+           : `<div class="poster none" aria-hidden="true">${esc(name.slice(0, 1))}</div>`;
+}
+/* Event codes and theatre-link keywords from a group's watches help pick the right poster. */
+let posterAsk = null;
+async function fetchPosters(gs) {
+  const need = gs.filter(g => !(g.name in posters)).map(g => {
+    const events = [], keywords = [];
+    for (const w of g.items) {
+      const m = (w.url || "").match(/\/(?:lang|formats|late)\/(ET\d+)/); if (m) events.push(m[1]);
+      const k = new URLSearchParams((w.url || "").split("?")[1] || "").get("movie"); if (k) keywords.push(k);
+    }
+    return { name: g.name, events: [...new Set(events)], keywords: [...new Set(keywords)] };
+  });
+  if (!need.length || posterAsk) return;
+  need.forEach(g => posters[g.name] = "");
+  try { posterAsk = api("/api/posters", { method: "POST", body: { groups: need } }); Object.assign(posters, await posterAsk); }
+  catch { /* placeholders stay */ }
+  finally { posterAsk = null; }
+  renderBoard();
+}
+async function loadWatches() {
+  try { watches = await api("/api/watches"); renderBoard(); }
+  catch (e) { $("#board").innerHTML = `<p class="empty"><b>Can't reach changedetection.</b> Check that its container is running, then refresh.</p>`; }
+}
+function editForm(w) {
+  const ds = urlDates(w.url);
+  return `<div class="edit">
+    <label>Name<input name="title" value="${esc(w.title)}"></label>
+    ${ds ? `<div class="pair"><label>From<input type="date" name="from" value="${iso(ds[0])}"></label>
+      <label>To<input type="date" name="to" value="${iso(ds[ds.length-1])}"></label></div>` : ""}
+    <label>Check every<select name="interval">${[1,2,5,10,30,60,180].map(n => `<option value="${n}" ${n === w.interval ? "selected" : ""}>${n < 60 ? n + " min" : n / 60 + " h"}</option>`).join("")}</select></label>
+    <label>Link<textarea name="url" rows="3">${esc(w.url)}</textarea></label>
+    <p class="explain">Changing the dates or link mutes the watch until its next check, so the change itself doesn't send an alert.</p>
+    <div class="actions"><button class="go" data-act="save">Save changes</button><button data-act="cancel" class="quiet">Cancel</button></div>
+  </div>`;
+}
+$("#board").addEventListener("input", e => {
+  const box = e.target.closest(".edit"); if (!box || !["from","to"].includes(e.target.name)) return;
+  const out = expand(box.querySelector("[name=from]").value, box.querySelector("[name=to]").value);
+  if (out.length) box.querySelector("[name=url]").value = setUrlDates(box.querySelector("[name=url]").value, out);
+});
+$("#board").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const el = b.closest(".watch"), id = el.dataset.id, w = watches.find(x => x.id === id), act = b.dataset.act;
+  const slot = el.querySelector(".slot");
+  try {
+    if (act === "toggle") { openId = openId === id ? null : id; renderBoard(); return; }
+    if (act === "output") {
+      if (!w.url.startsWith(cfg.helper)) { window.open(w.url, "_blank", "noopener"); return; }
+      slot.innerHTML = "<pre>Asking BookMyShow…</pre>";
+      const r = await api("/api/preview?url=" + encodeURIComponent(w.url)); slot.innerHTML = `<pre>${esc(r.text)}</pre>`; return;
+    }
+    if (act === "edit") { slot.innerHTML = editForm(w); slot.querySelector("input").focus(); return; }
+    if (act === "cancel") { slot.innerHTML = ""; return; }
+    if (act === "save") {
+      const box = slot.querySelector(".edit");
+      const r = await api("/api/watches/" + id, { method: "PUT", body: { title: box.querySelector("[name=title]").value, url: box.querySelector("[name=url]").value.trim(), interval: box.querySelector("[name=interval]").value } });
+      toast(r.muted_until_recheck ? "Saved. Muted until its next check." : "Saved."); await loadWatches(); return;
+    }
+    if (act === "delete") {
+      if (!confirm(`Delete "${w.title}"?`)) return;
+      await api("/api/watches/" + id, { method: "DELETE" }); openId = null; toast("Deleted the watch."); await loadWatches(); return;
+    }
+    b.disabled = true;
+    await api(`/api/watches/${id}/${act}`, { method: "POST" });
+    toast({ recheck: "Checking now.", pause: "Paused.", unpause: "Resumed.", mute: "Muted.", unmute: "Unmuted." }[act]);
+    setTimeout(loadWatches, act === "recheck" ? 6000 : 300);
+  } catch (err) { toast(err.message); b.disabled = false; }
+});
+$("#filter").oninput = renderBoard;
+$("#refresh").onclick = loadWatches;
+
+(async () => {
+  try { cfg = await api("/api/config"); } catch { cfg = { helper: "http://bms-seats:8000" }; }
+  if (cfg.changedetection) $("#cdlink").href = cfg.changedetection; else $("#cdlink").classList.add("hidden");
+  $("#lt_date").value = iso(localYmd(new Date()));
+  renderKinds(); loadWatches(); loadMovies();
+  setInterval(() => { if (!document.querySelector(".edit") && document.visibilityState === "visible") loadWatches(); }, 30000);
+})();
+</script>
+</body>
+</html>
