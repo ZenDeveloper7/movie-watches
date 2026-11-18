@@ -24,12 +24,19 @@ which does the scheduling and sends the notifications.
 | `/district/<language\|any>/<district page slug>[?date=YYYY-MM-DD]` | Whether District bookings are open |
 | `/district-late/<district page slug>?date=YYYY-MM-DD&from=HHMM` | District shows starting at or after a time |
 | `/releases/<ET…>/<YYYYMMDD>/<venue>` | Seats released back into a sold-out show |
+| `/last?path=<route path and query>` | The last successful reply for that route, as JSON `{age, text}` (used by the dashboard) |
 
 Query `region` (default `HYD`) and `city` (default derived from region) pick the city.
 
 ## Dashboard
 
-- Watches grouped by movie, each with a status light: checking, paused or muted, or needs a look.
+- Watches grouped by movie with posters, each with a status light: checking, paused or muted, or needs a look.
+- Each watch lists the shows it currently sees, like "Nov 20, 8:15 AM, PCX Screen", with a **Book** link to the seat
+  layout. These come from the helper's last reply to changedetection (`/last?path=…`), so they cost no extra BookMyShow requests.
+- **Booked it** on a movie deletes all of that movie's watches in one go.
+- **Health alerts:** every 5 minutes the dashboard checks that each watch is being checked on schedule and isn't
+  failing. If a problem shows up on two checks in a row, it sends one message through changedetection's notification
+  URLs, and another when the watch recovers.
 - Add a watch by picking a movie from the city's BookMyShow listings. Choose premium screens, a language, new formats, District, late shows or any other link.
 - Preview what a watch will see before adding it.
 - Editing a watch's dates or link mutes it until its next check, so the edit doesn't send an alert.

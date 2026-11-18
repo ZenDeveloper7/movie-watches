@@ -50,7 +50,19 @@ body { margin: 0; background: var(--house); color: var(--ink); font: 16px/1.5 va
   border: 1px solid var(--rule); box-shadow: none; }
 @media (max-width: 560px) { .movie { grid-template-columns: 64px minmax(0, 1fr); gap: 14px; } .poster.none { font-size: 30px; } }
 .movie:last-child { border-bottom: 0; }
-.movie h2 { font: 800 clamp(30px, 5vw, 44px)/.95 var(--display); margin: 0 0 10px; letter-spacing: .005em; }
+.movie h2 { font: 800 clamp(30px, 5vw, 44px)/.95 var(--display); margin: 0; letter-spacing: .005em; }
+.mhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.mhead button { flex: none; font-size: 14px; padding: 5px 12px; }
+.shows { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 10px 38px; }
+.show { display: inline-flex; align-items: baseline; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 999px; text-decoration: none;
+  color: var(--ink); background: color-mix(in srgb, var(--velvet) 10%, var(--stage)); border: 1px solid color-mix(in srgb, var(--velvet) 35%, transparent); font-size: 14px; }
+.show:hover { border-color: var(--velvet); }
+.show b { font-weight: 700; }
+.show small { color: var(--dim); font-size: 13px; }
+.show .bk { background: var(--velvet); color: var(--velvet-ink); border-radius: 999px; padding: 1px 10px; font-weight: 700; font-size: 13px; }
+.more { font-size: 13px; color: var(--dim); align-self: center; }
+.when .open { color: var(--velvet); font-weight: 700; }
+@media (max-width: 560px) { .shows { padding-left: 12px; } }
 .watch { border-radius: 8px; }
 .watch + .watch { margin-top: 2px; }
 .row { width: 100%; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 12px; align-items: center;
@@ -232,6 +244,7 @@ const VENUE_NAMES = { ALUC: "Allu Kokapet", PRHN: "Prasads" };
 const SCREEN_NAMES = { "DOLBY CINEMA": "Dolby Cinema", "PCX|HDR": "PCX or HDR" };
 let cfg = {}, kind = "screens", movies = [], movie = null, watches = [], openId = null;
 const posters = {}; // movie group name -> image URL ("" when none found)
+const shows = {};   // watch id -> { items: [...], at: ms, url }
 
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 4000); }
 async function api(path, opts = {}) {
@@ -472,15 +485,18 @@ function renderBoard() {
   if (!list.length) { $("#board").innerHTML = `<p class="empty">No watch matches “${esc(f)}”.</p>`; return; }
   const gs = groups(list);
   fetchPosters(gs);
-  $("#board").innerHTML = gs.map(g => `<section class="movie">${posterTag(g.name)}<div><h2>${esc(g.name)}</h2>${g.items.map(w => {
+  fetchShows(gs.flatMap(g => g.items));
+  $("#board").innerHTML = gs.map(g => `<section class="movie" data-movie="${esc(g.name)}">${posterTag(g.name)}<div>
+    <div class="mhead"><h2>${esc(g.name)}</h2><button data-booked="${esc(g.items.map(w => w.id).join(","))}" title="Delete all of this movie's watches">Booked it</button></div>${g.items.map(w => {
     const d = describe(w), [lvl, note] = health(w), open = w.id === openId;
     return `<div class="watch${open ? " open" : ""}" data-id="${w.id}">
       <button class="row" data-act="toggle" aria-expanded="${open}">
         <span class="light ${lvl}" aria-hidden="true"></span>
         <span><span class="what">${esc(d.what)}</span>${d.sub ? ` <small>${esc(d.sub)}</small>` : ""}
           ${note ? `<br><span class="state ${lvl}">${esc(note)}</span>` : ""}</span>
-        <span class="when">${w.last_changed ? `<span class="alert">Alert ${ago(w.last_changed)}</span>` : `Checked ${ago(w.last_checked)}`}</span>
+        <span class="when">${whenTag(w)}</span>
       </button>
+      ${showsTag(w, open)}
       ${open ? `<div class="detail">
         <p class="facts">${esc(w.title)}<br>Checked ${ago(w.last_checked)}, every ${w.interval} min. ${w.last_changed ? `Last alert ${ago(w.last_changed)}.` : "No alerts yet."}</p>
         ${w.error ? `<p class="state fault" style="margin:0">${esc(w.error)}</p>` : ""}
@@ -496,6 +512,59 @@ function renderBoard() {
       </div>` : ""}
     </div>`;
   }).join("")}</div></section>`).join("");
+}
+/* Shows the watch currently sees, from the helper's text: every line with a "Book:" link. */
+function parseShows(text) {
+  const items = []; let date = "";
+  for (const line of (text || "").split("\n")) {
+    if (!line.includes("| Book: ")) { const m = line.match(/ on (\d{8})\b/); if (m) date = m[1]; continue; }
+    const i = line.lastIndexOf("| Book: "), left = line.slice(0, i).trim(), url = line.slice(i + 8).trim();
+    let m = left.match(/^(\d{8}): .*?BOOKINGS OPEN at (.*?)(?: \((.*)\))?$/);
+    if (m) {
+      const n = m[2].split(", ").length;
+      let fm = [...new Set((m[3] || "").split("; ").map(f => f.replace(/^2D \| /, "").trim()))].filter(f => f && f !== "2D" && f !== "?").join(", ");
+      if (fm.length > 48) fm = fm.slice(0, 46).replace(/,?\s*\S*$/, "") + "…";
+      items.push({ date: m[1], label: `${n} theatre${n > 1 ? "s" : ""}`, extra: fm, url }); continue;
+    }
+    m = left.match(/^District: .*OPEN \((.*)\)$/);
+    if (m) { items.push({ date: "", label: "Open on District", extra: m[1], url }); continue; }
+    const parts = left.split(" | ").map(x => x.trim()).filter(Boolean);
+    // Premium-screen lines are "time | screen | Movie - Language": keep the language only.
+    if (parts.length === 3 && / - [A-Za-z]+$/.test(parts[2]) && /^\d{1,2}:\d{2} [AP]M$/.test(parts[0])) parts[2] = parts[2].split(" - ").pop();
+    items.push({ date, label: (parts[0] || "Open").replace(/ BOOKABLE \(ET\d+\)$/, ""), extra: parts.slice(1).join(", "), url });
+  }
+  return items;
+}
+function whenTag(w) {
+  const n = shows[w.id] ? shows[w.id].items.length : 0;
+  if (n) return `<span class="open">${n} open</span>`;
+  return w.last_changed ? `<span class="alert">Alert ${ago(w.last_changed)}</span>` : `Checked ${ago(w.last_checked)}`;
+}
+function showsTag(w, open) {
+  const s = shows[w.id]; if (!s || !s.items.length) return "";
+  const max = open ? 60 : 4, list = s.items.slice(0, max);
+  return `<div class="shows">${list.map(x => `<a class="show" href="${esc(x.url)}" target="_blank" rel="noopener">
+      ${x.date ? `<b>${pretty(x.date)}</b>` : ""}<span>${esc(x.label)}</span>${x.extra ? `<small>${esc(x.extra)}</small>` : ""}<span class="bk">Book</span></a>`).join("")}
+    ${s.items.length > max ? `<span class="more">${s.items.length - max} more. Open the watch to see all.</span>` : ""}</div>`;
+}
+/* One request at a time; each watch refreshed at most every 2 minutes. */
+let showsBusy = false;
+async function fetchShows(list) {
+  if (showsBusy) return;
+  const due = list.filter(w => !w.paused && w.url.startsWith(cfg.helper) && (!shows[w.id] || shows[w.id].url !== w.url || Date.now() - shows[w.id].at > 120000));
+  if (!due.length) return;
+  showsBusy = true;
+  let changed = false;
+  for (const w of due) {
+    try {
+      const r = await api("/api/shows?url=" + encodeURIComponent(w.url));
+      const items = parseShows(r.text), before = JSON.stringify((shows[w.id] || {}).items || []);
+      shows[w.id] = { items, at: Date.now(), url: w.url };
+      if (JSON.stringify(items) !== before) changed = true;
+    } catch { shows[w.id] = { items: (shows[w.id] || {}).items || [], at: Date.now(), url: w.url }; }
+  }
+  showsBusy = false;
+  if (changed && !document.querySelector(".edit")) renderBoard();
 }
 function posterTag(name) {
   const u = posters[name];
@@ -542,6 +611,16 @@ $("#board").addEventListener("input", e => {
   if (out.length) box.querySelector("[name=url]").value = setUrlDates(box.querySelector("[name=url]").value, out);
 });
 $("#board").addEventListener("click", async e => {
+  const bk = e.target.closest("button[data-booked]");
+  if (bk) {
+    const name = bk.closest(".movie").dataset.movie, ids = bk.dataset.booked.split(",");
+    if (!confirm(`Booked ${name}? This deletes its ${ids.length} watch${ids.length > 1 ? "es" : ""}.`)) return;
+    bk.disabled = true; bk.textContent = "Deleting…";
+    let failed = 0;
+    for (const id of ids) { try { await api("/api/watches/" + id, { method: "DELETE" }); delete shows[id]; } catch { failed++; } }
+    toast(failed ? `Deleted ${ids.length - failed} of ${ids.length}. Try again for the rest.` : `Enjoy ${name}! Deleted its watches.`);
+    openId = null; await loadWatches(); return;
+  }
   const b = e.target.closest("button[data-act]"); if (!b) return;
   const el = b.closest(".watch"), id = el.dataset.id, w = watches.find(x => x.id === id), act = b.dataset.act;
   const slot = el.querySelector(".slot");

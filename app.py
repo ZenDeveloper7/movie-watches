@@ -40,6 +40,9 @@ CITY_SLUGS = {"HYD": "hyderabad", "MUMBAI": "mumbai", "NCR": "national-capital-r
 MAX_PAIRS = 4  # side-by-side pairs listed per alert
 
 lock = threading.Lock()
+# Last successful reply per request path (what changedetection saw), so the dashboard
+# can show current shows without asking BookMyShow again.
+last_output = {}
 
 
 def load_state():
@@ -466,6 +469,11 @@ class Handler(BaseHTTPRequestHandler):
         region = q.get("region", ["HYD"])[0]
         city = q.get("city", [CITY_SLUGS.get(region.upper(), region.lower())])[0]
         start = q.get("from", ["2000"])[0].replace(":", "")
+        if url.path == "/last":
+            hit = last_output.get(q.get("path", [""])[0])
+            if not hit:
+                return self.reply(404, "No reply cached for that path\n")
+            return self.reply(200, json.dumps({"age": round(time.time() - hit[0]), "text": hit[1]}))
         m = re.fullmatch(r"/late/(ET\d+)/(\d{8})/?", url.path)
         if m:
             event, date = m.groups()
@@ -570,6 +578,10 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, text)
 
     def reply(self, code, text):
+        if code == 200 and not self.path.startswith("/last"):
+            last_output[self.path] = (time.time(), text)
+            if len(last_output) > 500:
+                last_output.pop(next(iter(last_output)))
         body = text.encode()
         self.send_response(code)
         self.send_header("Content-Type", "text/plain; charset=utf-8")

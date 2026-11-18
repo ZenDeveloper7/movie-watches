@@ -32,6 +32,8 @@ services:
     ports:
       - "8000:8000"
     env_file: ./dashboard.env
+    volumes:
+      - ./data:/data   # health monitor state
     environment:
       TZ: Asia/Kolkata
       CD_URL: http://changedetection:5000

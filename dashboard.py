@@ -13,12 +13,15 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import apprise
 import requests
 
 CD_URL = os.environ.get("CD_URL", "http://changedetection:5000").rstrip("/")
 CD_KEY = os.environ["CD_API_KEY"]
 HELPER = os.environ.get("HELPER_URL", "http://bms-seats:8000").rstrip("/")
 CITY = os.environ.get("CITY", "hyderabad")
+HEALTH_EVERY = int(os.environ.get("HEALTH_CHECK_SECONDS", "300"))
+HEALTH_STATE = os.environ.get("HEALTH_STATE_FILE", "/data/dashboard-health.json")
 HERE = os.path.dirname(os.path.abspath(__file__))
 BMS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -244,6 +247,104 @@ def image(url):
     return img_cache[url]
 
 
+def current_shows(url):
+    """Helper text for a watch: the reply changedetection last got (no extra BookMyShow
+    traffic), or a fresh fetch when that is missing or older than 15 minutes."""
+    if not url.startswith(HELPER + "/"):
+        raise ValueError("Only movie watches list shows")
+    path = url[len(HELPER):]
+    try:
+        r = requests.get(f"{HELPER}/last", params={"path": path}, timeout=10)
+        if r.ok:
+            hit = r.json()
+            if hit["age"] < 900:
+                return {"text": hit["text"], "age": hit["age"]}
+    except (requests.RequestException, ValueError):
+        pass
+    text = cached(("live", url), 180, lambda: preview(url))
+    return {"text": text, "age": 0}
+
+
+# ---------- health monitor: Telegram message when a watch stops working ----------
+
+def load_health():
+    try:
+        with open(HEALTH_STATE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_health(st):
+    try:
+        os.makedirs(os.path.dirname(HEALTH_STATE), exist_ok=True)
+        with open(HEALTH_STATE + ".tmp", "w") as f:
+            json.dump(st, f)
+        os.replace(HEALTH_STATE + ".tmp", HEALTH_STATE)
+    except OSError as e:
+        print(f"saving health state failed: {e!r}", flush=True)
+
+
+def problem(w, now):
+    if w["paused"]:
+        return ""
+    if w["uses_default"]:
+        return "uses the global 3-hour check interval instead of its own"
+    if w["error"]:
+        return f"last check failed: {str(w['error'])[:160]}"
+    if w["last_checked"] and now - w["last_checked"] > max(w["interval"] * 180, 900):
+        mins = round((now - w["last_checked"]) / 60)
+        return f"hasn't been checked for {mins} min (should be every {w['interval']} min)"
+    return ""
+
+
+def notify(lines):
+    urls = cd("GET", "/notifications").get("notification_urls") or []
+    if not urls:
+        print("health: no notification URL configured in changedetection", flush=True)
+        return False
+    ap = apprise.Apprise()
+    for u in urls:
+        ap.add(u)
+    return ap.notify(title="Movie Watches", body="\n".join(lines))
+
+
+def health_loop():
+    """A problem has to show up on two checks in a row before it is reported, then it
+    is reported once; recovery is reported once too."""
+    st = load_health()  # watch id -> {"seen": n, "sent": bool, "title": str}
+    while True:
+        time.sleep(HEALTH_EVERY)
+        try:
+            ws, now = list_watches(), time.time()
+        except Exception as e:
+            print(f"health: changedetection unreachable: {e!r}", flush=True)
+            continue
+        bad, good = [], []
+        alive = {w["id"] for w in ws}
+        for w in ws:
+            why, s = problem(w, now), st.get(w["id"])
+            if why:
+                s = st.setdefault(w["id"], {"seen": 0, "sent": False})
+                s["seen"] += 1
+                s["title"] = w["title"]
+                if s["seen"] >= 2 and not s["sent"]:
+                    bad.append(f"⚠️ {w['title']}: {why}")
+                    s["sent"] = True
+            elif s:
+                if s.get("sent"):
+                    good.append(f"✅ {w['title']}: checking again")
+                st.pop(w["id"])
+        for gone in set(st) - alive:
+            st.pop(gone)
+        if bad or good:
+            try:
+                notify(bad + good + ["", "Fix it in the dashboard."])
+            except Exception as e:
+                print(f"health: notify failed: {e!r}", flush=True)
+        save_health(st)
+
+
 def preview(url):
     if not url.startswith(HELPER + "/"):
         raise ValueError("Preview only works for bms-seats helper URLs")
@@ -278,6 +379,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "public, max-age=86400")
             self.end_headers()
             return self.wfile.write(body)
+        if u.path == "/api/shows":
+            return self.wrap(lambda: current_shows(q.get("url", [""])[0]))
         if u.path == "/api/preview":
             return self.wrap(lambda: {"text": preview(q.get("url", [""])[0])})
         self.json({"error": "not found"}, 404)
@@ -349,4 +452,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     threading.Thread(target=unmute_loop, daemon=True).start()
+    threading.Thread(target=health_loop, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
