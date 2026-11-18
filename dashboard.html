@@ -124,6 +124,23 @@ pre { background: var(--well); border-radius: 8px; padding: 10px 12px; margin: 0
 .empty { color: var(--dim); padding: 24px 0; }
 .empty b { color: var(--ink); }
 
+/* ---------- view switch + this week ---------- */
+.views { display: flex; gap: 4px; }
+.views button { border-radius: 999px; padding: 5px 14px; }
+.views button[aria-pressed="true"] { background: var(--ink); color: var(--stage); border-color: var(--ink); }
+.week-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.week-head h2 { font: 800 clamp(30px, 5vw, 44px)/.95 var(--display); margin: 0; }
+.day { font: 800 22px/1 var(--display); margin: 22px 0 10px; color: var(--dim); }
+.day:first-of-type { margin-top: 0; }
+.films { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.film { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 14px; padding: 12px; border-radius: 10px; background: var(--stage); border: 1px solid var(--rule); }
+.film h3 { font: 800 24px/1 var(--display); margin: 0 0 6px; }
+.film p { margin: 0; font-size: 14px; color: var(--dim); }
+.film .status { color: var(--ink); font-weight: 700; margin-top: 6px; }
+.film .status.open { color: var(--live); }
+.film .actions { margin-top: 10px; }
+.film .actions button { font-size: 13px; padding: 5px 11px; }
+.film .poster.none { font-size: 32px; }
 #toast { position: fixed; bottom: 18px; left: 50%; transform: translate(-50%, 8px); background: var(--ink); color: var(--house);
   padding: 10px 18px; border-radius: 999px; font-size: 15px; opacity: 0; transition: opacity .18s, transform .18s; pointer-events: none;
   max-width: calc(100% - 32px); }
@@ -135,16 +152,21 @@ pre { background: var(--well); border-radius: 8px; padding: 10px 12px; margin: 0
 <header class="bar">
   <h1>Movie Watches</h1>
   <span class="summary" id="summary"></span>
+  <div class="views" role="group" aria-label="View">
+    <button type="button" data-view="board" aria-pressed="true">Watches</button>
+    <button type="button" data-view="week" aria-pressed="false">This week</button>
+  </div>
   <a id="cdlink" href="#" target="_blank" rel="noopener">Open changedetection</a>
 </header>
 
 <div class="house">
   <main>
-    <div class="tools">
+    <div class="tools" id="tools">
       <input id="filter" type="search" placeholder="Find a watch" aria-label="Find a watch">
       <button id="refresh" class="quiet">Refresh</button>
     </div>
     <div id="board"><p class="empty">Loading watches…</p></div>
+    <div id="week" class="hidden"></div>
   </main>
 
   <aside class="panel" aria-labelledby="addtitle">
@@ -163,7 +185,7 @@ pre { background: var(--well); border-radius: 8px; padding: 10px 12px; margin: 0
     </div>
     <div id="movieinfo" class="movieinfo hidden"></div>
 
-    <div data-form="screens" class="form edit">
+    <div data-form="screens seats" class="form edit">
       <label>Movie name in the theatre's link
         <input id="s_keyword" placeholder="e.g. dune">
       </label>
@@ -177,6 +199,15 @@ pre { background: var(--well); border-radius: 8px; padding: 10px 12px; margin: 0
         <label>Name<input id="cv_name" placeholder="AMB Cinemas"></label>
         <label>Screens<input id="cv_re" placeholder="IMAX|DOLBY"></label>
       </div>
+    </div>
+
+    <div data-form="seats" class="form edit">
+      <div class="pair three">
+        <label>Rows<input id="g_rows" value="E-K" placeholder="E-K or F,G,H"></label>
+        <label>Seats together<select id="g_n"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label>
+        <label>Within<select id="g_center"><option value="40">Middle 40%</option><option value="60" selected>Middle 60%</option><option value="80">Middle 80%</option><option value="100">Whole row</option></select></label>
+      </div>
+      <p class="explain">Row A is usually closest to the screen. Open a show's seat map on BookMyShow to see that screen's row letters.</p>
     </div>
 
     <div data-form="lang" class="form pair">
@@ -233,6 +264,7 @@ pre { background: var(--well); border-radius: 8px; padding: 10px 12px; margin: 0
 const $ = s => document.querySelector(s);
 const KINDS = [
   ["screens", "Premium screens", "Alerts when a Dolby, PCX or HDR show is added. The first check saves what's already open, so you won't get an alert for that."],
+  ["seats", "Good seats", "Alerts when a Dolby, PCX or HDR show has seats together in the rows you like, near the middle of the row."],
   ["lang", "Language", "Alerts when a new theatre or date opens in one language, in any format."],
   ["formats", "New formats", "Alerts when BookMyShow adds a language or format to the movie, like IMAX or an English dub."],
   ["district", "District", "Alerts when bookings open on District. Allu and Prasads aren't on District."],
@@ -280,10 +312,10 @@ function movieName() { return (movie && movie.title) || $("#movie").value.trim()
 function renderKinds() {
   $("#kinds").innerHTML = KINDS.map(([k, l]) => `<button type="button" data-kind="${k}" aria-pressed="${k === kind}">${l}</button>`).join("");
   $("#explain").textContent = KINDS.find(k => k[0] === kind)[2];
-  document.querySelectorAll(".form").forEach(f => f.classList.toggle("hidden", f.dataset.form !== kind));
+  document.querySelectorAll(".form").forEach(f => f.classList.toggle("hidden", !f.dataset.form.split(" ").includes(kind)));
   $("#moviebox").classList.toggle("hidden", kind === "district" || kind === "custom" || (kind === "late" && $("#lt_src").value === "district"));
   if (!["district", "custom"].includes(kind) && movie) $("#movieinfo").classList.remove("hidden"); else $("#movieinfo").classList.add("hidden");
-  $("#datebox").classList.toggle("hidden", !["screens", "lang"].includes(kind));
+  $("#datebox").classList.toggle("hidden", !["screens", "seats", "lang"].includes(kind));
   $("#interval").value = kind === "screens" ? "2" : "5";
   $("#previewout").classList.add("hidden");
   autoTitle();
@@ -320,14 +352,14 @@ $("#event").addEventListener("change", () => { const ev = $("#event").value.trim
 $("#s_keyword").addEventListener("input", e => { e.target.dataset.touched = 1; autoTitle(); });
 $("#v_custom").onchange = e => { $("#customvenue").classList.toggle("hidden", !e.target.checked); autoTitle(); };
 $("#lt_src").onchange = () => { $("#lt_durl_l").classList.toggle("hidden", $("#lt_src").value !== "district"); renderKinds(); };
-["#date_from","#date_to","#l_lang","#l_lang_custom","#d_url","#d_lang","#d_date","#lt_date","#lt_from","#v_aluc","#v_prhn","#cv_code","#cv_name","#cv_re","#lt_durl","#c_url"]
+["#g_rows","#g_n","#g_center","#date_from","#date_to","#l_lang","#l_lang_custom","#d_url","#d_lang","#d_date","#lt_date","#lt_from","#v_aluc","#v_prhn","#cv_code","#cv_name","#cv_re","#lt_durl","#c_url"]
   .forEach(s => $(s).addEventListener("input", autoTitle));
 $("#date_from").addEventListener("change", () => { if (!$("#date_to").value || $("#date_to").value < $("#date_from").value) $("#date_to").value = $("#date_from").value; autoTitle(); });
 
 function build() {
   const H = cfg.helper, name = movieName(), ds = expand($("#date_from").value, $("#date_to").value), dl = rangeLabel(ds);
   const ev = $("#event").value.trim();
-  if (kind === "screens") {
+  if (kind === "screens" || kind === "seats") {
     const kw = $("#s_keyword").value.trim().toLowerCase();
     if (!kw) throw new Error("Type the movie name to look for in the theatre's listings.");
     if (!ds.length) throw new Error("Pick the dates to watch.");
@@ -341,6 +373,15 @@ function build() {
     }
     if (!v.length) throw new Error("Pick at least one theatre.");
     const short = (name || kw).replace(/^Avengers:\s*/i, "");
+    if (kind === "seats") {
+      const rows = $("#g_rows").value.trim().toUpperCase().replace(/\s+/g, "");
+      if (rows && !/^([A-Z]+(-[A-Z])?)(,[A-Z]+(-[A-Z])?)*$/.test(rows)) throw new Error("Write rows like E-K or F,G,H.");
+      const extra = `&rows=${encodeURIComponent(rows)}&n=${$("#g_n").value}&center=${$("#g_center").value}`;
+      return v.map(([code, vname, re, label]) => ({
+        title: `${short} ${label} good seats - ${vname} - ${dl}`,
+        url: `${H}/seats/${code}/${ds.join(",")}?movie=${encodeURIComponent(kw)}&screen=${encodeURIComponent(re)}${extra}`,
+      }));
+    }
     return v.map(([code, vname, re, label]) => ({
       title: `${short} ${label} - ${vname} - ${dl}`,
       url: `${H}/screens/${code}/${ds.join(",")}?movie=${encodeURIComponent(kw)}&screen=${encodeURIComponent(re)}`,
@@ -441,6 +482,11 @@ function describe(w) {
     const scr = q.get("screen") || "", venue = VENUE_NAMES[m[1]] || m[1];
     return { what: `${SCREEN_NAMES[scr] || scr.replace(/\|/g, " or ")} at ${venue}`, sub: rangeLabel(m[2].split(",")) };
   }
+  if ((m = p.match(/^\/seats\/(\w+)\/([\d,]+)/))) {
+    const scr = q.get("screen") || "", venue = VENUE_NAMES[m[1]] || m[1], n = q.get("n") || "2", rows = q.get("rows");
+    return { what: `${n} seat${n === "1" ? "" : "s"} together in ${rows ? "rows " + rows : "any row"} at ${venue}`,
+             sub: `${SCREEN_NAMES[scr] || scr.replace(/\|/g, " or ")}, ${rangeLabel(m[2].split(","))}` };
+  }
   if ((m = p.match(/^\/lang\/[\w,]+\/(\w+)/))) {
     const l = m[1][0].toUpperCase() + m[1].slice(1);
     return { what: `${l} bookings on BookMyShow`, sub: rangeLabel((q.get("dates") || "").split(",").filter(Boolean)) };
@@ -453,7 +499,7 @@ function describe(w) {
 }
 /* Movie name from the watch title; "Godzilla" and "Godzilla Minus Zero" share a group. */
 function movieOf(t) {
-  return t.split(" - ")[0].replace(/\s+(DOLBY|PCX\/HDR|PCX|HDR|IMAX)(\/\w+)*$/i, "").replace(/^Avengers:?\s*/i, "").trim();
+  return t.split(" - ")[0].replace(/\s+good seats$/i, "").replace(/\s+(DOLBY|PCX\/HDR|PCX|HDR|IMAX)(\/\w+)*$/i, "").replace(/^Avengers:?\s*/i, "").trim();
 }
 function groups(list) {
   const gs = [];
@@ -650,6 +696,71 @@ $("#board").addEventListener("click", async e => {
 });
 $("#filter").oninput = renderBoard;
 $("#refresh").onclick = loadWatches;
+
+/* ---------- this week ---------- */
+let view = "board", week = null;
+const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function dayLabel(isoDate) {
+  const d = new Date(isoDate + "T00:00:00"), t = new Date(); t.setHours(0, 0, 0, 0);
+  const diff = Math.round((d - t) / 86400000);
+  const base = `${DOW[d.getDay()]}, ${MON[d.getMonth()]} ${d.getDate()}`;
+  return diff === 0 ? `Today, ${base}` : diff === 1 ? `Tomorrow, ${base}` : diff < 0 ? `Out since ${base}` : base;
+}
+function watching(title) {
+  const lc = title.toLowerCase().replace(/^avengers:?\s*/, "");
+  return groups(watches).some(g => lc === g.key || lc.startsWith(g.key + " ") || g.key.startsWith(lc + " "));
+}
+function renderWeek() {
+  const box = $("#week");
+  if (!week) { box.innerHTML = `<p class="empty">Looking up this week's releases…</p>`; return; }
+  if (!week.length) { box.innerHTML = `<p class="empty"><b>Nothing new on BookMyShow this week.</b></p>`; return; }
+  let html = `<div class="week-head"><h2>This week</h2><span class="summary">${week.length} releases on BookMyShow, ${week.filter(r => r.open).length} open for booking</span></div>`;
+  let day = "";
+  for (const r of week) {
+    if (r.release !== day) { if (day) html += `</div>`; day = r.release; html += `<h3 class="day">${dayLabel(day)}</h3><div class="films">`; }
+    const has = watching(r.title);
+    html += `<article class="film" data-event="${esc(r.event)}">
+      ${r.poster ? `<img class="poster" src="${esc(r.poster)}" alt="${esc(r.title)} poster" loading="lazy">` : `<div class="poster none" aria-hidden="true">${esc(r.title.slice(0, 1))}</div>`}
+      <div><h3>${esc(r.title)}</h3>
+        <p>${esc(r.languages || "Language not listed")}</p>
+        <p>${esc(r.formats || "")}</p>
+        <p class="status ${r.open ? "open" : ""}">${r.open ? "Booking open" : "Not open yet"}${has ? ", you're watching it" : ""}</p>
+        <div class="actions">
+          <button data-quick="screens">Premium screens</button>
+          <button data-quick="seats">Good seats</button>
+          <button data-quick="lang">A language</button>
+        </div>
+      </div></article>`;
+  }
+  box.innerHTML = html + `</div>`;
+}
+async function loadWeek() {
+  renderWeek();
+  try { week = await api("/api/releases"); } catch (e) { week = null; $("#week").innerHTML = `<p class="empty"><b>Couldn't load releases.</b> BookMyShow didn't answer. Try again in a minute.</p>`; return; }
+  renderWeek();
+}
+function setView(v) {
+  view = v;
+  document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === v));
+  $("#board").classList.toggle("hidden", v !== "board"); $("#tools").classList.toggle("hidden", v !== "board");
+  $("#week").classList.toggle("hidden", v !== "week");
+  if (v === "week" && !week) loadWeek(); else if (v === "week") renderWeek();
+}
+document.querySelector(".views").onclick = e => { const b = e.target.closest("button[data-view]"); if (b) setView(b.dataset.view); };
+/* Quick add: fill the add panel for that movie and kind, starting on its release day. */
+$("#week").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-quick]"); if (!b) return;
+  const r = week.find(x => x.event === b.closest(".film").dataset.event);
+  kind = b.dataset.quick; renderKinds();
+  $("#movie").value = r.title; $("#event").value = r.event;
+  $("#s_keyword").dataset.touched = ""; $("#s_keyword").value = r.slug;
+  const start = r.release < iso(localYmd(new Date())) ? iso(localYmd(new Date())) : r.release;
+  const end = new Date(start + "T00:00:00"); end.setDate(end.getDate() + (kind === "lang" ? 3 : 6));
+  $("#date_from").value = start; $("#date_to").value = iso(localYmd(end));
+  await loadMovieDetails(r.event, { title: r.title, slug: r.slug, event: r.event });
+  $(".panel").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  toast(`Set up for ${r.title}. Check the details, then add the watch.`);
+});
 
 (async () => {
   try { cfg = await api("/api/config"); } catch { cfg = { helper: "http://bms-seats:8000" }; }

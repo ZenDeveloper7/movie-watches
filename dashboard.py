@@ -10,6 +10,8 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -247,6 +249,55 @@ def image(url):
     return img_cache[url]
 
 
+def parse_release(text):
+    for fmt in ("%b %d, %Y", "%d %b, %Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text.strip(), fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def releases(days_back=3, days_ahead=7):
+    """BookMyShow movies in the city releasing from `days_back` days ago to `days_ahead`
+    days from now, with poster, languages, formats and whether booking is open."""
+    today = date.today()
+    lo, hi = today - timedelta(days=days_back), today + timedelta(days=days_ahead)
+    listing = cached("movies", 1800, bms_movies)
+
+    def detail(m):
+        try:
+            return m, cached(("movie", m["event"]), 1800, lambda: bms_movie(m["event"]))
+        except Exception as e:
+            print(f"release detail {m['event']} failed: {e!r}", flush=True)
+            return m, None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        found = list(pool.map(detail, listing))
+    out = []
+    for m, d in found:
+        rel = parse_release(d["release"]) if d and d.get("release") else None
+        if not rel or not lo <= rel <= hi:
+            continue
+        out.append({"event": m["event"], "slug": m["slug"], "title": d["title"] if d["title"] != m["event"] else m["title"],
+                    "release": rel.isoformat(), "languages": d["listed_languages"], "formats": d["listed_formats"],
+                    "bookable": d["bookable"], "open": d["book_button"], "poster": d.get("poster", "")})
+    # One entry per movie: language versions have their own event codes.
+    merged = {}
+    for r in out:
+        k = r["title"].lower()
+        if k not in merged:
+            merged[k] = r
+            continue
+        m = merged[k]
+        m["open"] = m["open"] or r["open"]
+        seen = {b["event"] for b in m["bookable"]}
+        m["bookable"] += [b for b in r["bookable"] if b["event"] not in seen]
+    out = list(merged.values())
+    out.sort(key=lambda r: (r["release"], not r["open"], r["title"].lower()))
+    return out
+
+
 def current_shows(url):
     """Helper text for a watch: the reply changedetection last got (no extra BookMyShow
     traffic), or a fresh fetch when that is missing or older than 15 minutes."""
@@ -379,6 +430,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "public, max-age=86400")
             self.end_headers()
             return self.wfile.write(body)
+        if u.path == "/api/releases":
+            return self.wrap(lambda: cached("releases", 900, releases))
         if u.path == "/api/shows":
             return self.wrap(lambda: current_shows(q.get("url", [""])[0]))
         if u.path == "/api/preview":

@@ -18,6 +18,7 @@ which does the scheduling and sends the notifications.
 | Route | What it lists |
 |---|---|
 | `/screens/<venue>/<YYYYMMDD>[,<YYYYMMDD>…]?movie=<slug part>&screen=<regex>` | Shows of a movie at one theatre whose screen or format matches, e.g. `DOLBY CINEMA` or `PCX\|HDR`, with seat-layout links |
+| `/seats/<venue>/<YYYYMMDD>[,…]?movie=…&screen=…&rows=E-K&n=2&center=60` | The same shows, but only those with `n` free seats side by side in those rows, within the middle `center`% of the row. A line stays the same while good seats remain, so you get one alert when they appear |
 | `/lang/<ET…>[,<ET…>]/<language>?dates=<YYYYMMDD,…>` | Per date: theatres and formats where that language is bookable |
 | `/formats/<ET…>` | The language and format versions BookMyShow offers, each with its own event code |
 | `/late/<ET…>/<YYYYMMDD>?from=HHMM` | Citywide shows starting at or after a time |
@@ -33,6 +34,9 @@ Query `region` (default `HYD`) and `city` (default derived from region) pick the
 - Watches grouped by movie with posters, each with a status light: checking, paused or muted, or needs a look.
 - Each watch lists the shows it currently sees, like "Nov 20, 8:15 AM, PCX Screen", with a **Book** link to the seat
   layout. These come from the helper's last reply to changedetection (`/last?path=…`), so they cost no extra BookMyShow requests.
+- **Good seats:** watch premium shows for seats together in the rows you like, near the middle of the row.
+- **This week:** BookMyShow releases from 3 days ago to 7 days ahead, grouped by day, with posters, languages,
+  formats and whether booking is open. One tap sets up a premium-screens, good-seats or language watch for that movie.
 - **Booked it** on a movie deletes all of that movie's watches in one go.
 - **Health alerts:** every 5 minutes the dashboard checks that each watch is being checked on schedule and isn't
   failing. If a problem shows up on two checks in a row, it sends one message through changedetection's notification

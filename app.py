@@ -192,6 +192,83 @@ def render_screens(shows, venue, date, movie, screen_re):
     return "\n".join(out) + "\n"
 
 
+def parse_rows(spec):
+    """'F-K' / 'F,G,H' / 'A-C,AA' -> set of row labels; empty spec -> None (all rows)."""
+    rows = set()
+    for part in (spec or "").upper().replace(" ", "").split(","):
+        m = re.fullmatch(r"([A-Z])-([A-Z])", part)
+        if m:
+            a, b = sorted((m.group(1), m.group(2)))
+            rows |= {chr(c) for c in range(ord(a), ord(b) + 1)}
+        elif re.fullmatch(r"[A-Z]+", part):
+            rows.add(part)
+    return rows or None
+
+
+def good_block_rows(seats, rows_ok, n, center):
+    """Rows (within rows_ok) that have n free seats side by side inside the middle
+    `center` percent of the row."""
+    by_row = {}
+    for cat in seats.values():
+        for sid, ok in cat.items():
+            m = re.fullmatch(r"([A-Za-z]+)(\d+)", sid)
+            if m:
+                by_row.setdefault(m.group(1).upper(), []).append((int(m.group(2)), ok))
+    found = []
+    for row, lst in by_row.items():
+        if rows_ok and row not in rows_ok:
+            continue
+        lst.sort()
+        lo = int(len(lst) * (100 - center) / 200)
+        run, prev = 0, None
+        for num, ok in lst[lo:len(lst) - lo]:
+            if ok and run and num == prev + 1:
+                run += 1
+            elif ok:
+                run = 1
+            else:
+                run = 0
+            prev = num
+            if run >= n:
+                found.append(row)
+                break
+    return sorted(found, key=lambda r: (len(r), r))
+
+
+seats_cache = {}
+
+
+def good_seats(venue, date, region, city, movie, screen_re, rows_ok, n, center):
+    key = (venue, date, city, movie, screen_re.pattern, tuple(sorted(rows_ok or [])), n, center)
+    hit = seats_cache.get(key)
+    if hit and time.time() - hit[0] < MIN_POLL_GAP:
+        return hit[1]
+    out = []
+    for code, when, attrs, name, link in screens(venue, date, region, city, movie, screen_re):
+        sid = link.rstrip("/").split("/")[-2]
+        try:
+            seats = fetch_seats(venue, sid)
+        except Exception as e:
+            print(f"seats {venue}/{sid}: {e!r}", flush=True)
+            continue
+        time.sleep(1)
+        if good_block_rows(seats, rows_ok, n, center):
+            out.append((code, when, attrs, name, link))
+    seats_cache[key] = (time.time(), out)
+    return out
+
+
+def render_seats(shows, venue, date, movie, screen_re, rows_spec, n, center):
+    where = f"rows {rows_spec}" if rows_spec else "any row"
+    want = f"{n} together in {where}, middle {center}%"
+    out = [f"{movie} at {venue} on {date}, screens matching /{screen_re.pattern}/, {want}", ""]
+    # The wanted block, not the seats found, so a line stays the same while good seats remain.
+    out += [f"{t} | {attrs or name} | {want} | Book: {link}" for _, t, attrs, name, link in shows]
+    if not shows:
+        out.append("No good seats yet.")
+    return "\n".join(out) + "\n"
+
+
 lang_cache = {}
 
 
@@ -545,6 +622,27 @@ class Handler(BaseHTTPRequestHandler):
             lines += [f"{lang} {dim} BOOKABLE ({code}) | Book: https://in.bookmyshow.com/movies/{city}/x/buytickets/{code}"
                       for lang, dim, code in opts] or ["No bookable formats yet"]
             return self.reply(200, "\n".join(lines) + "\n")
+        m = re.fullmatch(r"/seats/(\w+)/(\d{8}(?:,\d{8})*)/?", url.path)
+        if m:
+            venue, dates = m.group(1), m.group(2).split(",")
+            if "movie" not in q or "screen" not in q:
+                return self.reply(400, "Need ?movie=..&screen=..[&rows=F-K&n=2&center=60]\n")
+            movie, screen_re = q["movie"][0].lower(), re.compile(q["screen"][0], re.I)
+            rows_spec = q.get("rows", [""])[0].upper().replace(" ", "")
+            try:
+                n = max(1, min(10, int(q.get("n", ["2"])[0])))
+                center = max(10, min(100, int(q.get("center", ["60"])[0])))
+            except ValueError:
+                return self.reply(400, "n and center must be numbers\n")
+            try:
+                with lock:
+                    text = "\n".join(render_seats(
+                        good_seats(venue, d, region, city, movie, screen_re, parse_rows(rows_spec), n, center),
+                        venue, d, movie, screen_re, rows_spec, n, center) for d in dates)
+            except Exception as e:
+                print(f"seats failed: {e!r}", flush=True)
+                return self.reply(503, f"BookMyShow fetch failed: {e}\n")
+            return self.reply(200, text)
         m = re.fullmatch(r"/screens/(\w+)/(\d{8}(?:,\d{8})*)/?", url.path)
         if m:
             venue, dates = m.group(1), m.group(2).split(",")
