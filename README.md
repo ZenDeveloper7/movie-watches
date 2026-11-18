@@ -58,3 +58,7 @@ its HTTP client.
 - Changing the helper's output text makes changedetection alert once. Mute the affected
   watches, let them recheck, then unmute.
 - This scrapes public pages for personal use. Keep the check intervals polite.
+
+## License
+
+[MIT](LICENSE)
